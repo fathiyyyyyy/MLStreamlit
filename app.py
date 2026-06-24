@@ -1,7 +1,16 @@
 import streamlit as st
-import pandas as pd, numpy as np, joblib, json, os
+import pandas as pd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from xgboost import XGBClassifier
+from sklearn.metrics import accuracy_score, confusion_matrix
+import json
 
 st.set_page_config(
     page_title="😴 SleepSense – Prediksi Gangguan Tidur",
@@ -13,7 +22,6 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap');
 html, body, [class*="css"] { font-family: 'Quicksand', sans-serif; }
 .stApp { background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%); }
-
 .hero {
     background: linear-gradient(135deg, #4c1d95 0%, #6d28d9 50%, #a855f7 100%);
     border-radius: 22px; padding: 2.5rem 2rem; margin-bottom: 1.5rem;
@@ -21,14 +29,12 @@ html, body, [class*="css"] { font-family: 'Quicksand', sans-serif; }
 }
 .hero h1 { font-size: 2.4rem; font-weight: 700; margin: 0; color: white; }
 .hero p  { font-size: 1rem; color: #e9d5ff; margin: .5rem 0 0; }
-
 .card {
     background: #20203a; border-radius: 18px; padding: 1.6rem;
     border: 1px solid rgba(168,85,247,0.15);
     box-shadow: 0 4px 20px rgba(0,0,0,0.3); margin-bottom: 1rem;
 }
 .card h3 { font-weight: 700; margin: 0 0 1rem; font-size: 1.05rem; color: #c4b5fd; }
-
 .metric-box {
     background: linear-gradient(135deg, #20203a, #2a2a4a);
     border-radius: 16px; padding: 1.3rem; text-align: center;
@@ -37,7 +43,6 @@ html, body, [class*="css"] { font-family: 'Quicksand', sans-serif; }
 .metric-box .val { font-size: 1.8rem; font-weight: 700; color: #c4b5fd; }
 .metric-box .lbl { font-size: .72rem; color: #9ca3af; font-weight: 600;
                    text-transform: uppercase; letter-spacing: 1px; margin-top: .3rem; }
-
 .result-good {
     background: linear-gradient(135deg, #064e3b, #047857);
     border: 2px solid #34d399; border-radius: 18px; padding: 2rem; text-align: center;
@@ -51,7 +56,6 @@ html, body, [class*="css"] { font-family: 'Quicksand', sans-serif; }
 .result-icon  { font-size: 4rem; }
 .result-label { font-size: 1.8rem; font-weight: 700; color: white; }
 .result-sub   { font-size: .9rem; color: #e5e7eb; margin-top: .3rem; }
-
 div[data-testid="stSidebar"] {
     background: linear-gradient(180deg, #1a1a2e 0%, #4c1d95 100%) !important;
 }
@@ -59,14 +63,12 @@ div[data-testid="stSidebar"] p,
 div[data-testid="stSidebar"] span,
 div[data-testid="stSidebar"] label { color: #e9d5ff !important; }
 div[data-testid="stSidebar"] h2 { color: #c4b5fd !important; }
-
 div[data-testid="stButton"] > button {
     background: linear-gradient(135deg, #7c3aed, #c026d3) !important;
     color: white !important; border: none !important;
     border-radius: 12px !important; font-weight: 700 !important;
     width: 100% !important; font-size: 1rem !important; padding: .7rem !important;
 }
-
 p, span, li { color: #e5e7eb !important; }
 h1, h2, h3, h4 { color: #f3f4f6 !important; }
 .stTabs [data-baseweb="tab"] { color: #9ca3af !important; }
@@ -74,44 +76,76 @@ h1, h2, h3, h4 { color: #f3f4f6 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-BASE = os.path.dirname(__file__)
-
-@st.cache_data
-def load_data():
-    return pd.read_csv(os.path.join(BASE, 'data', 'sleep_data.csv'))
-
-@st.cache_data
-def load_results():
-    with open(os.path.join(BASE, 'model', 'results.json')) as f:
-        return json.load(f)
-
-@st.cache_data
-def load_fi():
-    with open(os.path.join(BASE, 'model', 'feature_importance.json')) as f:
-        return json.load(f)
-
-@st.cache_resource
-def load_models():
-    scaler  = joblib.load(os.path.join(BASE, 'model', 'scaler.pkl'))
-    enc     = joblib.load(os.path.join(BASE, 'model', 'encoders.pkl'))
-    tgt_enc = joblib.load(os.path.join(BASE, 'model', 'target_encoder.pkl'))
-    fcols   = joblib.load(os.path.join(BASE, 'model', 'feature_cols.pkl'))
-    models  = {}
-    for name in ['Decision Tree','KNN','Random Forest','XGBoost']:
-        fname = name.lower().replace(' ', '_')
-        models[name] = joblib.load(os.path.join(BASE, 'model', f'{fname}_model.pkl'))
-    return scaler, enc, tgt_enc, fcols, models
-
-df = load_data()
-df['Sleep Disorder'] = df['Sleep Disorder'].fillna('None')
-results = load_results()
-feat_importance = load_fi()
-scaler, encoders, target_le, FEATURE_COLS, models = load_models()
-
 PLOT_THEME = dict(plot_bgcolor='#20203a', paper_bgcolor='#20203a',
                   font_color='#e5e7eb', margin=dict(t=30,b=10,l=10,r=10))
 DISORDER_COLORS = {'None': '#34d399', 'Insomnia': '#fb923c', 'Sleep Apnea': '#f87171'}
-DISORDER_EMOJI  = {'None': '😴', 'Insomnia': '😵', 'Sleep Apnea': '😮\u200d💨'}
+DISORDER_EMOJI  = {'None': '😴', 'Insomnia': '😵', 'Sleep Apnea': '😮‍💨'}
+
+@st.cache_data
+def load_and_train():
+    url = "https://raw.githubusercontent.com/datasciencedojo/datasets/master/Sleep_health_and_lifestyle_dataset.csv"
+    try:
+        df = pd.read_csv(url)
+    except:
+        st.error("Gagal load dataset. Pastikan koneksi internet aktif.")
+        st.stop()
+
+    df['Sleep Disorder'] = df['Sleep Disorder'].fillna('None')
+
+    if 'Blood Pressure' in df.columns:
+        bp = df['Blood Pressure'].str.split('/', expand=True)
+        df['BP_Systolic']  = bp[0].astype(float)
+        df['BP_Diastolic'] = bp[1].astype(float)
+        df = df.drop('Blood Pressure', axis=1)
+
+    if 'Person ID' in df.columns:
+        df = df.drop('Person ID', axis=1)
+
+    cat_cols = ['Gender', 'Occupation', 'BMI Category']
+    encoders = {}
+    for col in cat_cols:
+        if col in df.columns:
+            le = LabelEncoder()
+            df[col] = le.fit_transform(df[col])
+            encoders[col] = le
+
+    target_le = LabelEncoder()
+    y = target_le.fit_transform(df['Sleep Disorder'])
+    X = df.drop('Sleep Disorder', axis=1)
+    FEATURE_COLS = X.columns.tolist()
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_scaled, y, test_size=0.2, random_state=42, stratify=y)
+
+    model_list = {
+        'Decision Tree':  DecisionTreeClassifier(max_depth=8, random_state=42),
+        'KNN':            KNeighborsClassifier(n_neighbors=5),
+        'Random Forest':  RandomForestClassifier(n_estimators=200, random_state=42, n_jobs=-1),
+        'XGBoost':        XGBClassifier(n_estimators=150, random_state=42, eval_metric='mlogloss'),
+    }
+
+    results = {}
+    for name, clf in model_list.items():
+        clf.fit(X_train, y_train)
+        pred = clf.predict(X_test)
+        acc  = accuracy_score(y_test, pred)
+        cm   = confusion_matrix(y_test, pred)
+        results[name] = {'model': clf, 'accuracy': acc, 'cm': cm.tolist()}
+
+    fi = dict(zip(FEATURE_COLS, results['Random Forest']['model'].feature_importances_.tolist()))
+
+    # Rebuild df with original labels for display
+    df_display = pd.read_csv(url)
+    df_display['Sleep Disorder'] = df_display['Sleep Disorder'].fillna('None')
+
+    return df_display, results, fi, scaler, encoders, target_le, FEATURE_COLS
+
+with st.spinner("⏳ Sedang loading & training model... (~10 detik)"):
+    df, results, feat_importance, scaler, encoders, target_le, FEATURE_COLS = load_and_train()
+
+models = {name: r['model'] for name, r in results.items()}
 
 with st.sidebar:
     st.markdown("## 😴 SleepSense")
@@ -282,13 +316,12 @@ elif page == "🔍 Cek Kesehatan Tidur":
     c1, c2, c3 = st.columns(3)
     gender = c1.selectbox("Gender", encoders['Gender'].classes_)
     age    = c2.slider("Usia", 18, 70, 28)
-    occ_options = encoders['Occupation'].classes_
-    occupation = c3.selectbox("Pekerjaan", occ_options)
+    occupation = c3.selectbox("Pekerjaan", encoders['Occupation'].classes_)
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="card"><h3>😴 Pola Tidur</h3>', unsafe_allow_html=True)
     c4, c5 = st.columns(2)
-    sleep_dur = c4.slider("Durasi Tidur (jam)", 4.0, 10.0, 7.0, step=0.1)
+    sleep_dur  = c4.slider("Durasi Tidur (jam)", 4.0, 10.0, 7.0, step=0.1)
     sleep_qual = c5.slider("Kualitas Tidur (1-10)", 1, 10, 7)
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -299,36 +332,36 @@ elif page == "🔍 Cek Kesehatan Tidur":
     steps    = c8.number_input("Langkah Harian", 1000, 20000, 6000, step=500)
 
     c9, c10, c11 = st.columns(3)
-    bmi_cat  = c9.selectbox("Kategori BMI", encoders['BMI Category'].classes_)
-    hr       = c10.slider("Detak Jantung (bpm)", 50, 110, 72)
-    bp_sys   = c11.number_input("Tekanan Darah Sistolik", 90, 180, 120)
-    bp_dia   = st.number_input("Tekanan Darah Diastolik", 60, 120, 80)
+    bmi_cat = c9.selectbox("Kategori BMI", encoders['BMI Category'].classes_)
+    hr      = c10.slider("Detak Jantung (bpm)", 50, 110, 72)
+    bp_sys  = c11.number_input("Tekanan Darah Sistolik", 90, 180, 120)
+    bp_dia  = st.number_input("Tekanan Darah Diastolik", 60, 120, 80)
     st.markdown('</div>', unsafe_allow_html=True)
 
     if st.button("🔍 Analisis Kesehatan Tidur Saya"):
         input_dict = {
-            'Gender': encoders['Gender'].transform([gender])[0],
-            'Age': age,
-            'Occupation': encoders['Occupation'].transform([occupation])[0],
-            'Sleep Duration': sleep_dur,
-            'Quality of Sleep': sleep_qual,
+            'Gender':                  encoders['Gender'].transform([gender])[0],
+            'Age':                     age,
+            'Occupation':              encoders['Occupation'].transform([occupation])[0],
+            'Sleep Duration':          sleep_dur,
+            'Quality of Sleep':        sleep_qual,
             'Physical Activity Level': activity,
-            'Stress Level': stress,
-            'BMI Category': encoders['BMI Category'].transform([bmi_cat])[0],
-            'Heart Rate': hr,
-            'Daily Steps': steps,
-            'BP_Systolic': bp_sys,
-            'BP_Diastolic': bp_dia,
+            'Stress Level':            stress,
+            'BMI Category':            encoders['BMI Category'].transform([bmi_cat])[0],
+            'Heart Rate':              hr,
+            'Daily Steps':             steps,
+            'BP_Systolic':             bp_sys,
+            'BP_Diastolic':            bp_dia,
         }
-        input_df = pd.DataFrame([input_dict])[FEATURE_COLS]
+        input_df     = pd.DataFrame([input_dict])[FEATURE_COLS]
         input_scaled = scaler.transform(input_df)
 
-        pred_idx = clf.predict(input_scaled)[0]
+        pred_idx   = clf.predict(input_scaled)[0]
         pred_label = target_le.inverse_transform([pred_idx])[0]
-        proba = clf.predict_proba(input_scaled)[0] if hasattr(clf,'predict_proba') else None
+        proba      = clf.predict_proba(input_scaled)[0] if hasattr(clf, 'predict_proba') else None
 
         box_class = "result-good" if pred_label == "None" else "result-warn"
-        emoji = DISORDER_EMOJI.get(pred_label, "😴")
+        emoji     = DISORDER_EMOJI.get(pred_label, "😴")
 
         if pred_label == "None":
             sub_text = "Pola tidurmu terlihat sehat! Pertahankan gaya hidup ini 👍"
@@ -358,4 +391,3 @@ elif page == "🔍 Cek Kesehatan Tidur":
             st.markdown('</div>', unsafe_allow_html=True)
 
         st.info("⚠️ **Disclaimer:** Hasil ini hanya prediksi berbasis data dan bukan diagnosis medis. Konsultasikan ke dokter untuk pemeriksaan lebih lanjut.")
-'
