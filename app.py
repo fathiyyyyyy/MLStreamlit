@@ -83,7 +83,7 @@ DISORDER_EMOJI  = {'None': '😴', 'Insomnia': '😵', 'Sleep Apnea': '😮‍�
 
 @st.cache_data
 def load_and_train():
-    url = "https://raw.githubusercontent.com/datasciencedojo/datasets/master/Sleep_health_and_lifestyle_dataset.csv"
+    url = "Sleep_health_and_lifestyle_dataset.csv"
     try:
         df = pd.read_csv(url)
     except:
